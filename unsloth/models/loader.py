@@ -61,7 +61,7 @@ def __get_model_name(
             f"For now, we shall load `{model_name}` instead (still 4bit, just slower downloading)."
         )
         return model_name
-    
+
     elif not load_in_4bit and lower_model_name in INT_TO_FLOAT_MAPPER:
 
         new_model_name = INT_TO_FLOAT_MAPPER[lower_model_name]
@@ -157,7 +157,7 @@ class FastLanguageModel(FastLlamaModel):
         *args, **kwargs,
     ):
         if token is None: token = get_token()
-        
+
         old_model_name = model_name
         model_name = get_model_name(model_name, load_in_4bit)
 
@@ -196,13 +196,19 @@ class FastLanguageModel(FastLlamaModel):
 
         # Old transformers versions check
         both_exist = (is_model and is_peft) and not SUPPORTS_LLAMA32
-        
+
         if SUPPORTS_LLAMA32:
-            # New transformers need to check manually.
-            files = HfFileSystem(token = token).glob(os.path.join(model_name, "*.json"))
-            files = (os.path.split(x)[-1] for x in files)
-            if sum(x == "adapter_config.json" or x == "config.json" for x in files) >= 2:
-                both_exist = True
+            # Check if folder exists locally
+            if os.path.isdir(model_name):
+                exist_adapter_config = os.path.exists(os.path.join(model_name, "adapter_config.json"))
+                exist_config         = os.path.exists(os.path.join(model_name, "config.json"))
+                both_exist = exist_adapter_config and exist_config
+            else:
+                files = HfFileSystem(token = token).glob(os.path.join(model_name, "*.json"))
+                files = (os.path.split(x)[-1] for x in files)
+                if sum(x == "adapter_config.json" or x == "config.json" for x in files) >= 2:
+                    both_exist = True
+                pass
             pass
         pass
 
@@ -224,7 +230,7 @@ class FastLanguageModel(FastLlamaModel):
                     f"This includes Llama 3.1. The minimum required version is 4.43.2\n"\
                     f'Try `pip install --upgrade "transformers>=4.43.2"`\n'\
                     f"to obtain the latest transformers build, then restart this session."\
-                ) 
+                )
             raise RuntimeError(autoconfig_error or peft_error)
         pass
 
@@ -294,7 +300,7 @@ class FastLanguageModel(FastLlamaModel):
                     "To update flash-attn, do the below:\n"\
                     '\npip install --no-deps --upgrade "flash-attn>=2.6.3"'
                 )
-            
+
             dispatch_model = FastGemma2Model
         elif model_type == "qwen2":
             dispatch_model = FastQwen2Model
@@ -332,7 +338,7 @@ class FastLanguageModel(FastLlamaModel):
             revision          = revision if not is_peft else None,
             *args, **kwargs,
         )
-        
+
         if resize_model_vocab is not None:
             model.resize_token_embeddings(resize_model_vocab)
         pass
