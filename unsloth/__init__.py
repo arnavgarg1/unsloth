@@ -31,6 +31,10 @@ import numpy as np
 # enabling it will require much more work, so we have to prioritize. Please understand!
 # We do have a beta version, which you can contact us about!
 # Thank you for your understanding and we appreciate it immensely!
+
+# Fixes https://github.com/unslothai/unsloth/issues/1266
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+
 if "CUDA_VISIBLE_DEVICES" in os.environ:
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     devices = os.environ["CUDA_VISIBLE_DEVICES"]
@@ -53,17 +57,23 @@ pass
 # Reduce VRAM usage by reducing fragmentation
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
-try:
-    import torch
-except:
-    raise ImportError("Pytorch is not installed. Go to https://pytorch.org/.\n"\
-                      "We have some installation instructions on our Github page.")
+# Hugging Face Hub faster downloads
+if "HF_HUB_ENABLE_HF_TRANSFER" not in os.environ:
+    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 pass
 
-# Hugging Face Hub faster downloads (only enable during Colab and Kaggle sessions)
-keynames = "\n" + "\n".join(os.environ.keys())
-if "\nCOLAB_"  in keynames or "\nKAGGLE_" in keynames:
-    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
+# Log Unsloth is being used
+os.environ["UNSLOTH_IS_PRESENT"] = "1"
+
+try:
+    import torch
+except ModuleNotFoundError:
+    raise ImportError(
+        "Unsloth: Pytorch is not installed. Go to https://pytorch.org/.\n"\
+        "We have some installation instructions on our Github page."
+    )
+except Exception as exception:
+    raise exception
 pass
 
 # We support Pytorch 2
@@ -124,7 +134,7 @@ if "SPACE_AUTHOR_NAME" not in os.environ and "SPACE_REPO_NAME" not in os.environ
 
             # Try linking cuda folder, or everything in local
             if len(possible_cudas) == 0:
-                os.system(f"ldconfig /usr/local/")
+                os.system("ldconfig /usr/local/")
             else:
                 find_number = re.compile(r"([\d\.]{2,})")
                 latest_cuda = np.argsort([float(find_number.search(x).group(1)) for x in possible_cudas])[::-1][0]
@@ -154,8 +164,18 @@ if "SPACE_AUTHOR_NAME" not in os.environ and "SPACE_REPO_NAME" not in os.environ
     pass
 pass
 
+# Check for unsloth_zoo
+try:
+    import unsloth_zoo
+except:
+    raise ImportError("Unsloth: Please install unsloth_zoo via `pip install unsloth-zoo`")
+pass
+
 from .models import *
 from .save import *
 from .chat_templates import *
 from .tokenizer_utils import *
 from .trainer import *
+
+# Patch TRL trainers for backwards compatibility
+_patch_trl_trainer()

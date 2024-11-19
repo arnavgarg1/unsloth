@@ -26,6 +26,15 @@ import numpy as np
 import gc
 import subprocess
 
+from unsloth_zoo.tokenizer_utils import (
+    mean_of_trained_tokens,
+    add_new_tokens,
+    fix_untrained_tokens,
+)
+from unsloth_zoo.training_utils import (
+    fix_zero_training_loss,
+)
+
 __all__ = [
     "load_correct_tokenizer",
     "fix_sentencepiece_tokenizer",
@@ -55,6 +64,7 @@ IGNORED_TOKENIZER_NAMES = frozenset(
 keynames = "\n" + "\n".join(os.environ.keys())
 IS_COLAB_ENVIRONMENT  = "\nCOLAB_"  in keynames
 IS_KAGGLE_ENVIRONMENT = "\nKAGGLE_" in keynames
+KAGGLE_TMP = "/tmp"
 del keynames
 
 
@@ -126,7 +136,7 @@ def convert_to_fast_tokenizer(
 ):
     is_fast = getattr(slow_tokenizer, "is_fast", False)
     if is_fast: return slow_tokenizer
-    
+
     try:
         tokenizer_name = slow_tokenizer.__class__.__name__
         lowered_tokenizer_name = tokenizer_name.lower()
@@ -259,7 +269,7 @@ def assert_same_tokenization(slow_tokenizer, fast_tokenizer):
     check_chat_template1 = True
     check_chat_template2 = True
     check_chat_template3 = True
-    
+
     """
     Weirdly Mistral tokenizers are actually correct??
     Ie below will actually load mistral v1 and v3 incorrectly!
@@ -394,7 +404,7 @@ def fix_sentencepiece_gguf(saved_location):
     from transformers.utils import sentencepiece_model_pb2
     import json
     from enum import IntEnum
-    
+
     class SentencePieceTokenTypes(IntEnum):
         NORMAL = 1
         UNKNOWN = 2
@@ -461,8 +471,12 @@ def _load_correct_tokenizer(
     cache_dir = "huggingface_tokenizers_cache",
     fix_tokenizer = True,
 ):
-    if IS_COLAB_ENVIRONMENT or IS_KAGGLE_ENVIRONMENT:
+    if IS_COLAB_ENVIRONMENT:
         cache_dir = cache_dir
+    elif IS_KAGGLE_ENVIRONMENT:
+        # /tmp of Kaggle seems has a 80GB limit!
+        # Let's utilize them
+        cache_dir = os.path.join(KAGGLE_TMP, cache_dir)
     else:
         cache_dir = None
     pass
@@ -510,7 +524,7 @@ def _load_correct_tokenizer(
             fast_tokenizer.add_bos_token = slow_tokenizer.add_bos_token
         if hasattr(fast_tokenizer, "add_eos_token") and hasattr(slow_tokenizer, "add_eos_token"):
             fast_tokenizer.add_eos_token = slow_tokenizer.add_eos_token
-        
+
         # Confirm if slow and fast are equivalent!
         if assert_same_tokenization(slow_tokenizer, fast_tokenizer):
             return fast_tokenizer
@@ -572,17 +586,23 @@ pass
 
 
 def _fix_chat_template(chat_template):
-    endfor = "{% endfor %}"
+    endfor = "{% endif %}"
     where = chat_template.find(endfor)
-    if where == -1: return chat_template
+    if where == -1:
+        endfor = "{%- endif %}"
+        where = chat_template.find(endfor)
+    if where == -1:
+        return chat_template
 
     after_endfor = chat_template[where + len(endfor):]
 
-    if "{% if" not in after_endfor and "{% set " not in after_endfor and \
+    dash = "-" if endfor.startswith("{%-") else ""
+
+    if "{%" + dash + " if" not in after_endfor and "{%" + dash + " set " not in after_endfor and \
         after_endfor.startswith("{{") and after_endfor.endswith("}}") and \
         after_endfor.count("{{") == 1 and after_endfor.count("}}") == 1:
 
-        after_endfor = "{% if add_generation_prompt %}" + after_endfor + "{% endif %}"
+        after_endfor = "{%" + dash + " if add_generation_prompt %}" + after_endfor + endfor
 
         chat_template = chat_template[:where + len(endfor)] + after_endfor
     pass
@@ -629,10 +649,12 @@ def fix_chat_template(tokenizer):
 
     if no == yes:
         # SAME?! That's not good! We check for add_generation_prompt
-        if "{% if add_generation_prompt %}" not in chat_template:
+        if   "{% if add_generation_prompt %}" not in chat_template and \
+            "{%- if add_generation_prompt %}" not in chat_template:
             # Try fixing it by adding it
             new_chat_template = _fix_chat_template(chat_template)
-            if "{% if add_generation_prompt %}" not in new_chat_template:
+            if   "{% if add_generation_prompt %}" not in new_chat_template and \
+                "{%- if add_generation_prompt %}" not in new_chat_template:
                 raise RuntimeError(
                     f"Unsloth: The tokenizer `{tokenizer.name_or_path}`\n"\
                     "does not have a {% if add_generation_prompt %} for generation purposes.\n"\
@@ -760,7 +782,7 @@ def check_tokenizer(
                     f"Fix your tokenizer since it'll perform out of bounds memory accesses."
                 )
             pass
-            
+
             if IS_COLAB_ENVIRONMENT or IS_KAGGLE_ENVIRONMENT:
                 cache_dir = "huggingface_tokenizers_cache"
             else:
@@ -1109,7 +1131,7 @@ def add_new_tokens(
         internal_model = internal_model.model
     pass
     internal_model._need_to_train_embeddings = True
-    
+
     return
 pass
 
@@ -1166,6 +1188,7 @@ pass
 PRE_CHECK = check_nvidia()
 
 
+import inspect
 from inspect import getsource
 import trl.trainer.sft_trainer
 from trl.trainer.sft_trainer import *
@@ -1204,6 +1227,35 @@ except:
 pass
 
 
+def patch_trl_tokenizer_processing_class(trainer_name):
+    # New TRL removes tokenizer!
+    # We return it back!
+    exec(f"from trl import {trainer_name}", globals())
+    if str(eval(f"{trainer_name}").__name__).startswith("Unsloth"): return None
+    parameters = eval(f"inspect.signature({trainer_name}).parameters")
+    if "tokenizer" in parameters: return None
+
+    args = {
+        key : \
+            value.default \
+            if type(value.default) is not str else \
+            f"'{value.default}'" \
+        for key, value in parameters.items()
+    }
+    args["tokenizer"] = None
+    new_args = args.copy()
+    del new_args["tokenizer"]
+    del new_args["processing_class"]
+    new_args = ",\n".join(f"{' '*12}{key} = {key}" for key in new_args) + \
+        f",\n{' '*12}processing_class = tokenizer if tokenizer else processing_class"
+    args = ",\n".join(f"{' '*8}{key} = {value}" for key, value in args.items())
+    args = f"def __init__(\n" + f"{' '*8}self,\n" + args + "):"
+    args += f"\n{' '*8}\n{' '*8}super().__init__(\n{new_args}\n{' '*8})"
+    new_class = f"""class Unsloth{trainer_name}({trainer_name}):\n{' '*4}{args}\n"""
+    return new_class
+pass
+
+
 def patch_sft_trainer_tokenizer():
     """
         Patches the trainer with changes
@@ -1219,7 +1271,10 @@ def patch_sft_trainer_tokenizer():
 
         check_text = \
         "\n"\
-        "test_text = dataset[0][dataset_text_field] if (formatting_func is None or not use_formatting_func) else formatting_func(dataset[0])[0]\n"\
+        "if 'tokenizer'          not in locals(): tokenizer = processing_class\n"\
+        "if 'formatting_func'    not in locals(): raise RuntimeError('Unsloth: Please file a bug report - `formatting_func` does not exist!')\n"\
+        "if 'dataset_text_field' not in locals(): raise RuntimeError('Unsloth: Please file a bug report - `dataset_text_field` does not exist!')\n"\
+        "test_text = dataset[0][dataset_text_field] if (formatting_func is None and dataset_text_field is not None) else formatting_func(dataset[0])[0]\n"\
         "chat_template = getattr(tokenizer, 'chat_template', None)\n"\
         "chat_template = '' if chat_template is None else chat_template\n"\
         "has_bos_token_already = (test_text.startswith(tokenizer.bos_token) or tokenizer.bos_token in chat_template) "\
@@ -1263,8 +1318,24 @@ def patch_sft_trainer_tokenizer():
         "    torch.cuda.empty_cache()\n"\
         "pass\n"\
         "\n"\
-        "fix_untrained_tokens(self.model, self.tokenizer, self.train_dataset, eps = 1e-16)\n\n"\
-        "fix_zero_training_loss(self.model, self.tokenizer, self.train_dataset)\n\n"
+        "tokenizer = self.processing_class if hasattr(self, 'processing_class') else self.tokenizer\n"\
+        "fix_untrained_tokens(self.model, tokenizer, self.train_dataset, IGNORED_TOKENIZER_NAMES, eps = 1e-16)\n\n"\
+        "fix_zero_training_loss(self.model, tokenizer, self.train_dataset)\n\n"
+
+        # Warn on gradient accumulation steps if it's used
+        check_text += \
+        "\n"\
+        "try:\n"\
+        "    gradient_accumulation_steps = self.args.gradient_accumulation_steps\n"\
+        "    if type(gradient_accumulation_steps) is int and gradient_accumulation_steps > 1:\n"\
+        "        from transformers import __version__ as transformers_version\n"\
+        "        from packaging.version import Version\n"\
+        "        if Version(transformers_version) <= Version('4.45.2'):\n"\
+        "            print('**** Unsloth: Please use our fixed gradient_accumulation_steps by updating transformers, TRL and Unsloth!\\n'\\\n"\
+        "                  '`pip install --upgrade --no-cache-dir --no-deps unsloth transformers git+https://github.com/huggingface/trl.git`')\n"\
+        "except:\n"\
+        "    pass\n"\
+        "\n\n"
 
         # Add NEFTune since it doesn't seem to work?? We need to manually inject it
         check_text += \
@@ -1282,13 +1353,14 @@ def patch_sft_trainer_tokenizer():
         # Also DPO weirdly tokenizes non numeric columns? Delete them!
         check_text += \
         "\n"\
-        "column_names = set(self.train_dataset.column_names)\n"\
-        "check = ['chosen', 'rejected', 'prompt', 'chosen_input_ids', 'chosen_attention_mask',\n"\
-        " 'chosen_labels', 'rejected_input_ids', 'rejected_attention_mask', 'rejected_labels',\n"\
-        " 'prompt_input_ids', 'prompt_attention_mask']\n"\
-        "if all(x in column_names for x in check):\n"\
-        "    self.train_dataset = self.train_dataset.remove_columns(['chosen', 'rejected', 'prompt'])\n"\
-        "del check, column_names\n"\
+        "if hasattr(self.train_dataset, 'column_names'):\n"\
+        "    column_names = set(self.train_dataset.column_names)\n"\
+        "    check = ['chosen', 'rejected', 'prompt', 'chosen_input_ids', 'chosen_attention_mask',\n"\
+        "        'chosen_labels', 'rejected_input_ids', 'rejected_attention_mask', 'rejected_labels',\n"\
+        "        'prompt_input_ids', 'prompt_attention_mask']\n"\
+        "    if all(x in column_names for x in check):\n"\
+        "        self.train_dataset = self.train_dataset.remove_columns(['chosen', 'rejected', 'prompt'])\n"\
+        "    del check, column_names\n"\
         "\n"
 
         check_text = check_text.split("\n")
@@ -1301,4 +1373,16 @@ def patch_sft_trainer_tokenizer():
     pass
 pass
 
+# Fix TRL trainers with removed tokenizer args (got replaced with processing_class)
+for trainer_name in ("SFTTrainer", "DPOTrainer", "KTOTrainer"):
+    trainer_text = patch_trl_tokenizer_processing_class(trainer_name)
+    if trainer_text is None: continue
+    try:
+        exec(trainer_text, globals())
+    except:
+        raise RuntimeError(f"Unsloth: Please file a bug report! Error patching {trainer_name}")
+    exec(f"trl.trainer.{trainer_name} = Unsloth{trainer_name}", globals())
+pass
+
+# FInally patch TRL tokenizer things
 patch_sft_trainer_tokenizer()

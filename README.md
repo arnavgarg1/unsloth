@@ -40,6 +40,7 @@ All notebooks are **beginner friendly**! Add your dataset, click "Run All", and 
 - Click [here](https://github.com/unslothai/unsloth/wiki) for detailed documentation for Unsloth.
 
 ## 🦥 Unsloth.ai News
+- 📣 NEW! We found and helped fix a [gradient accumulation bug](https://unsloth.ai/blog/gradient)! Please update Unsloth and transformers.
 - 📣 NEW! [Llama 3.2 Conversational notebook](https://colab.research.google.com/drive/1T5-zKWM_5OD21QHwXHiV9ixTRR7k3iB9?usp=sharing) includes training only on completions / outputs (increase accuracy), ShareGPT standardization and more!
 - 📣 NEW! [Llama 3.2 Kaggle notebook](https://www.kaggle.com/danielhanchen/kaggle-llama-3-2-1b-3b-unsloth-notebook) and [Llama 3.2 Kaggle conversational notebook](https://www.kaggle.com/code/danielhanchen/kaggle-llama-3-2-1b-3b-conversational-unsloth/notebook)
 - 📣 NEW! [Qwen 2.5 7b notebook](https://colab.research.google.com/drive/1Kose-ucXO1IBaZq5BvbwWieuubP7hxvQ?usp=sharing) finetuning is supported! Qwen 2.5 comes in multiple sizes - check our [4bit uploads](https://huggingface.co/unsloth) for 4x faster downloads!. 14b fits in a Colab GPU! [Qwen 2.5 conversational notebook](https://colab.research.google.com/drive/1qN1CEalC70EO1wGKhNxs1go1W9So61R5?usp=sharing)
@@ -136,12 +137,18 @@ pip install --no-deps trl peft accelerate bitsandbytes
 ### Pip Installation
 `⚠️Do **NOT** use this if you have Conda.` Pip is a bit more complex since there are dependency issues. The pip command is different for `torch 2.2,2.3,2.4,2.5` and CUDA versions.
 
-For other torch versions, we support `torch211`, `torch212`, `torch220`, `torch230`, `torch240` and for CUDA versions, we support `cu118` and `cu121`. For Ampere devices (A100, H100, RTX3090) and above, use `cu118-ampere` or `cu121-ampere`.
+For other torch versions, we support `torch211`, `torch212`, `torch220`, `torch230`, `torch240` and for CUDA versions, we support `cu118` and `cu121` and `cu124`. For Ampere devices (A100, H100, RTX3090) and above, use `cu118-ampere` or `cu121-ampere` or `cu124-ampere`.
 
 For example, if you have `torch 2.4` and `CUDA 12.1`, use:
 ```bash
 pip install --upgrade pip
 pip install "unsloth[cu121-torch240] @ git+https://github.com/unslothai/unsloth.git"
+```
+
+Another example, if you have `torch 2.5` and `CUDA 12.4`, use:
+```bash
+pip install --upgrade pip
+pip install "unsloth[cu124-torch250] @ git+https://github.com/unslothai/unsloth.git"
 ```
 
 And other examples:
@@ -153,6 +160,9 @@ pip install "unsloth[cu118-torch240] @ git+https://github.com/unslothai/unsloth.
 
 pip install "unsloth[cu121-torch230] @ git+https://github.com/unslothai/unsloth.git"
 pip install "unsloth[cu121-ampere-torch230] @ git+https://github.com/unslothai/unsloth.git"
+
+pip install "unsloth[cu121-torch250] @ git+https://github.com/unslothai/unsloth.git"
+pip install "unsloth[cu124-ampere-torch250] @ git+https://github.com/unslothai/unsloth.git"
 ```
 
 Or, run the below in a terminal to get the **optimal** pip installation command:
@@ -163,21 +173,34 @@ wget -qO- https://raw.githubusercontent.com/unslothai/unsloth/main/unsloth/_auto
 Or, run the below manually in a Python REPL:
 ```python
 try: import torch
-except: raise ImportError("Install torch via `pip install torch`")
+except: raise ImportError('Install torch via `pip install torch`')
 from packaging.version import Version as V
 v = V(torch.__version__)
 cuda = str(torch.version.cuda)
 is_ampere = torch.cuda.get_device_capability()[0] >= 8
-if cuda != "12.1" and cuda != "11.8": raise RuntimeError(f"CUDA = {cuda} not supported!")
+if cuda != "12.1" and cuda != "11.8" and cuda != "12.4": raise RuntimeError(f"CUDA = {cuda} not supported!")
 if   v <= V('2.1.0'): raise RuntimeError(f"Torch = {v} too old!")
 elif v <= V('2.1.1'): x = 'cu{}{}-torch211'
 elif v <= V('2.1.2'): x = 'cu{}{}-torch212'
 elif v  < V('2.3.0'): x = 'cu{}{}-torch220'
 elif v  < V('2.4.0'): x = 'cu{}{}-torch230'
 elif v  < V('2.5.0'): x = 'cu{}{}-torch240'
+elif v  < V('2.6.0'): x = 'cu{}{}-torch250'
 else: raise RuntimeError(f"Torch = {v} too new!")
 x = x.format(cuda.replace(".", ""), "-ampere" if is_ampere else "")
 print(f'pip install --upgrade pip && pip install "unsloth[{x}] @ git+https://github.com/unslothai/unsloth.git"')
+```
+
+### Windows Installation
+
+To run Unsloth directly on Windows:
+- Install Triton from this Windows fork and follow the instructions: https://github.com/woct0rdho/triton-windows
+- In the SFTTrainer, set `dataset_num_proc=1` to avoid a crashing issue:
+```python
+trainer = SFTTrainer(
+    dataset_num_proc=1,
+    ...
+)
 ```
 
 For **advanced installation instructions** or if you see weird errors during installations:
@@ -276,6 +299,9 @@ DPO (Direct Preference Optimization), PPO, Reward Modelling all seem to work as 
 We're in 🤗Hugging Face's official docs! We're on the [SFT docs](https://huggingface.co/docs/trl/main/en/sft_trainer#accelerate-fine-tuning-2x-using-unsloth) and the [DPO docs](https://huggingface.co/docs/trl/main/en/dpo_trainer#accelerate-dpo-fine-tuning-using-unsloth)!
 
 ```python
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0" # Optional set GPU device ID
+
 from unsloth import FastLanguageModel, PatchDPOTrainer
 from unsloth import is_bfloat16_supported
 PatchDPOTrainer()
