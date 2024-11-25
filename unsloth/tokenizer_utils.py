@@ -14,7 +14,7 @@
 
 from transformers import AutoTokenizer
 from transformers.convert_slow_tokenizer import convert_slow_tokenizer
-from transformers import PreTrainedTokenizerFast
+from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 import re
 import os
 from transformers.models.llama.modeling_llama import logger
@@ -505,7 +505,7 @@ def _load_correct_tokenizer(
     # Ignore Mistral ones - they're a bit weird to handle!
     elif "mistral" in tokenizer_name.lower():
         return fast_tokenizer
-    elif slow_tokenizer is not None:
+    elif slow_tokenizer is not None and isinstance(slow_tokenizer, PreTrainedTokenizer):
         if hasattr(fast_tokenizer, "add_bos_token") and hasattr(slow_tokenizer, "add_bos_token"):
             fast_tokenizer.add_bos_token = slow_tokenizer.add_bos_token
         if hasattr(fast_tokenizer, "add_eos_token") and hasattr(slow_tokenizer, "add_eos_token"):
