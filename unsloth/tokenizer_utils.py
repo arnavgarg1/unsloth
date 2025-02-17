@@ -137,7 +137,7 @@ def convert_to_fast_tokenizer(
 ):
     is_fast = getattr(slow_tokenizer, "is_fast", False)
     if is_fast: return slow_tokenizer
-    
+
     try:
         tokenizer_name = slow_tokenizer.__class__.__name__
         lowered_tokenizer_name = tokenizer_name.lower()
@@ -275,7 +275,7 @@ def assert_same_tokenization(slow_tokenizer, fast_tokenizer):
     check_chat_template1 = True
     check_chat_template2 = True
     check_chat_template3 = True
-    
+
     """
     Weirdly Mistral tokenizers are actually correct??
     Ie below will actually load mistral v1 and v3 incorrectly!
@@ -410,7 +410,7 @@ def fix_sentencepiece_gguf(saved_location):
     from transformers.utils import sentencepiece_model_pb2
     import json
     from enum import IntEnum
-    
+
     class SentencePieceTokenTypes(IntEnum):
         NORMAL = 1
         UNKNOWN = 2
@@ -510,9 +510,7 @@ def _load_correct_tokenizer(
         #     "Just informing you about this - this is not a critical error."
         # )
     pass
-    # Unsure why this occurs!
     if type(slow_tokenizer) is bool: slow_tokenizer = None
-
     fast_tokenizer = AutoTokenizer.from_pretrained(
         tokenizer_name,
         model_max_length  = model_max_length,
@@ -535,7 +533,7 @@ def _load_correct_tokenizer(
             fast_tokenizer.add_bos_token = slow_tokenizer.add_bos_token
         if hasattr(fast_tokenizer, "add_eos_token") and hasattr(slow_tokenizer, "add_eos_token"):
             fast_tokenizer.add_eos_token = slow_tokenizer.add_eos_token
-        
+
         # Confirm if slow and fast are equivalent!
         if assert_same_tokenization(slow_tokenizer, fast_tokenizer):
             return fast_tokenizer
@@ -810,7 +808,7 @@ def check_tokenizer(
                     f"Fix your tokenizer since it'll perform out of bounds memory accesses."
                 )
             pass
-            
+
             if IS_COLAB_ENVIRONMENT or IS_KAGGLE_ENVIRONMENT:
                 cache_dir = "huggingface_tokenizers_cache"
             else:
