@@ -260,7 +260,6 @@ pass
 def assert_same_tokenization(slow_tokenizer, fast_tokenizer):
     # Get eos_token, bos_token etc
     if not hasattr(slow_tokenizer, "all_special_tokens"): return True
-    if not hasattr(slow_tokenizer, "all_special_tokens"): return True
     dir_names = dir(slow_tokenizer)
     special_tokens = list(filter(None, (
         getattr(slow_tokenizer, x) for x in dir_names
