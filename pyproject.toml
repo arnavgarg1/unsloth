@@ -37,7 +37,7 @@ triton = [
 ]
 
 huggingface = [
-    "unsloth_zoo @ git+https://github.com/arnavgarg1/unsloth-zoo.git@706b15f61510b66fc0cbec29a71f3d8f74dda239",
+    "unsloth_zoo @ git+https://github.com/arnavgarg1/unsloth-zoo.git@fbf8777c08976489c8660e6355d0e4f401ec1917",
     "packaging",
     "tyro",
     "transformers>=4.46.1,!=4.47.0",
